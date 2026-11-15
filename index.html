@@ -13,6 +13,7 @@
     <!-- Top Drag Header (Minimal: D-Day, Date, Minimize, Close) -->
     <header class="widget-header">
       <div class="header-left">
+        <img src="icon.png?v=5" alt="Archive Hub" class="header-app-icon" />
         <button class="header-dday-pill no-drag" id="headerDdayPill" title="D-Day 직접 설정">+ D-Day</button>
         <span class="app-date" id="todayDate"></span>
       </div>
@@ -190,6 +191,18 @@
           </div>
         </div>
 
+        <div class="no-due-dock past-due-dock hidden" id="pastDueDock">
+          <div class="no-due-header past-due-header" id="pastDueHeader">
+            <span class="no-due-title" id="pastDueTitle">지난 할 일</span>
+            <button type="button" class="past-due-toggle-btn" id="pastDueToggleBtn" title="열기 / 닫기" aria-expanded="false">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+          </div>
+          <ul class="item-list no-due-list hidden" id="pastDueList"></ul>
+        </div>
+
         <div class="no-due-dock" id="noDueDock">
           <div class="no-due-header">
             <span class="no-due-title">예정 · 나중 할 일</span>
@@ -202,9 +215,17 @@
       <section class="tab-panel" id="tab-calendar">
         <div class="cal-header">
           <div class="cal-nav">
-            <button type="button" class="icon-btn" id="calPrevBtn" title="이전 달">◀</button>
+            <button type="button" class="icon-btn" id="calPrevBtn" title="이전 달">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
             <span class="cal-month-label" id="calMonthLabel">2026년 11월</span>
-            <button type="button" class="icon-btn" id="calNextBtn" title="다음 달">▶</button>
+            <button type="button" class="icon-btn" id="calNextBtn" title="다음 달">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </button>
           </div>
           <button type="button" class="ghost-btn" id="calTodayBtn">오늘</button>
         </div>

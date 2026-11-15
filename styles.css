@@ -170,8 +170,19 @@ html, body {
 
 .header-left {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: 7px;
+}
+
+.header-app-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
+  transform-origin: center;
+  will-change: transform;
 }
 
 .app-title {
@@ -184,6 +195,7 @@ html, body {
 .app-date {
   font-family: 'JetBrains Mono', monospace;
   font-size: 9.5px;
+  margin-left: 3px;
   color: var(--text-muted);
   font-weight: 400;
   letter-spacing: -0.01em;
@@ -719,6 +731,57 @@ html, body {
 
 .no-due-dock.hidden {
   display: none;
+}
+
+.past-due-dock {
+  margin-top: 6px;
+  margin-bottom: 4px;
+  max-height: 24%;
+}
+
+.past-due-header {
+  cursor: pointer;
+}
+
+.past-due-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.past-due-toggle-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.past-due-toggle-btn svg {
+  transition: transform 0.18s ease;
+}
+
+.past-due-toggle-btn[aria-expanded="false"] svg {
+  transform: rotate(-90deg);
+}
+
+.no-due-list.hidden {
+  display: none;
+}
+
+.del-btn.archive-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.del-btn.archive-btn:hover {
+  color: var(--accent);
 }
 
 .no-due-header {
@@ -2232,11 +2295,11 @@ html, body {
   gap: 5px;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(224, 108, 117, 0.14);
-  border: 1px solid rgba(224, 108, 117, 0.35);
-  color: #E06C75;
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #FCA5A5;
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .home-date-label {
@@ -2460,11 +2523,28 @@ html, body {
   gap: 6px;
 }
 
-.cal-month-label {
-  font-size: 13px;
-  font-weight: 600;
+.cal-nav .icon-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-hairline);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.cal-nav .icon-btn:hover {
+  border-color: var(--border-strong);
   color: var(--text-primary);
-  min-width: 82px;
+}
+
+.cal-month-label {
+  font-family: 'JetBrains Mono', 'IBM Plex Sans KR', monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  min-width: 88px;
   text-align: center;
 }
 
@@ -2596,6 +2676,19 @@ html, body {
   width: 4px;
   height: 4px;
   border-radius: 50%;
+}
+
+.cal-dot.exam {
+  background: #EF4444;
+}
+
+.cal-cell.has-exam .cal-day-num {
+  color: #F87171;
+  font-weight: 700;
+}
+
+.cal-mini-chip.exam {
+  font-weight: 700;
 }
 
 .cal-agenda-header {

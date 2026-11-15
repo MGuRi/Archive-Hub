@@ -295,11 +295,12 @@ function getDueInfo(dueDateStr) {
   const diffDays = Math.round((target - today) / (1000 * 60 * 60 * 24));
   if (diffDays < 0) return { label: `D+${Math.abs(diffDays)} 지남`, cls: 'pill-priority-high', urgent: true, diffDays };
   if (diffDays === 0) return { label: 'D-Day', cls: 'pill-priority-high', urgent: true, diffDays };
-  if (diffDays <= 2) return { label: `D-${diffDays}`, cls: 'pill-time', urgent: true, diffDays };
+  if (diffDays <= 1) return { label: `D-${diffDays}`, cls: 'pill-time', urgent: true, diffDays };
   return { label: `D-${diffDays}`, cls: 'pill-pinned', urgent: false, diffDays };
 }
 
-function createTodoListItem(item, rerender) {
+function createTodoListItem(item, rerender, opts = {}) {
+  const isPastDue = Boolean(opts.isPastDue);
   const isSummaryMode = Boolean(appData?.settings?.todoSummaryMode);
   const li = document.createElement('li');
   li.className = `card-item ${item.done ? 'done compact-row' : ''} ${(!item.dueDate || isSummaryMode) ? 'compact-row' : ''} ${item.priority === 'high' ? 'priority-high' : ''}`;
@@ -510,30 +511,43 @@ function createTodoListItem(item, rerender) {
 
   const delBtn = document.createElement('button');
   delBtn.className = 'del-btn';
-  delBtn.textContent = '×';
-  delBtn.onclick = async () => {
-    if (item.done) {
-      appData.items = appData.items.filter((t) => t.id !== item.id);
+  if (isPastDue) {
+    delBtn.classList.add('archive-btn');
+    delBtn.title = '아카이브 (목록에서 보내고 달력에는 보관)';
+    delBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>`;
+    delBtn.onclick = async () => {
+      item.archived = true;
+      item.done = true;
       rerender();
       await persistData();
-      return;
-    }
-    if (content.querySelector('.inline-confirm')) return;
-    const box = document.createElement('div');
-    box.className = 'inline-confirm';
-    box.innerHTML = `
-      <span>아직 완료되지 않았습니다. 삭제할까요?</span>
-      <button type="button" class="confirm-del">삭제</button>
-      <button type="button" class="cancel-del">취소</button>
-    `;
-    box.querySelector('.confirm-del').onclick = async () => {
-      appData.items = appData.items.filter((t) => t.id !== item.id);
-      rerender();
-      await persistData();
+      showUndoToast('아카이브로 보냈습니다 (달력에는 유지됨)');
     };
-    box.querySelector('.cancel-del').onclick = () => box.remove();
-    content.appendChild(box);
-  };
+  } else {
+    delBtn.textContent = '×';
+    delBtn.onclick = async () => {
+      if (item.done) {
+        appData.items = appData.items.filter((t) => t.id !== item.id);
+        rerender();
+        await persistData();
+        return;
+      }
+      if (content.querySelector('.inline-confirm')) return;
+      const box = document.createElement('div');
+      box.className = 'inline-confirm';
+      box.innerHTML = `
+        <span>아직 완료되지 않았습니다. 삭제할까요?</span>
+        <button type="button" class="confirm-del">삭제</button>
+        <button type="button" class="cancel-del">취소</button>
+      `;
+      box.querySelector('.confirm-del').onclick = async () => {
+        appData.items = appData.items.filter((t) => t.id !== item.id);
+        rerender();
+        await persistData();
+      };
+      box.querySelector('.cancel-del').onclick = () => box.remove();
+      content.appendChild(box);
+    };
+  }
 
   const actions = document.createElement('div');
   actions.className = 'card-actions';
@@ -663,27 +677,22 @@ function getEndOfThisWeekDateStr() {
   return addDaysToDateStr(getTodayDateString(), daysUntilSunday);
 }
 
+let isPastDueOpen = false;
+
 function renderTodos() {
   const list = $('todoList');
+  const pastDueDock = $('pastDueDock');
+  const pastDueList = $('pastDueList');
+  const pastDueTitle = $('pastDueTitle');
   const noDueDock = $('noDueDock');
   const noDueList = $('noDueList');
 
-  // Auto-remove past-due items (keep through D-Day; remove starting next day)
-  const beforeLen = appData.items.length;
-  appData.items = appData.items.filter((i) => {
-    if (!i.dueDate) return true;
-    const info = getDueInfo(i.dueDate);
-    return !info || info.diffDays >= 0;
-  });
-  if (appData.items.length !== beforeLen) {
-    persistData();
-  }
-
   const weekEndStr = getEndOfThisWeekDateStr();
-  const isThisWeekTodo = (i) => Boolean(i.dueDate) && !i.later && i.dueDate <= weekEndStr;
+  const isPastDueTodo = (i) => Boolean(i.dueDate) && !i.later && (getDueInfo(i.dueDate)?.diffDays ?? 0) < 0;
+  const isThisWeekTodo = (i) => Boolean(i.dueDate) && !i.later && !isPastDueTodo(i) && i.dueDate <= weekEndStr;
   const isFutureDatedTodo = (i) => Boolean(i.dueDate) && !i.later && i.dueDate > weekEndStr;
 
-  const scheduledItems = appData.items.filter(isThisWeekTodo);
+  const scheduledItems = appData.items.filter((i) => !i.archived && isThisWeekTodo(i));
   const total = scheduledItems.length;
   const doneCount = scheduledItems.filter((i) => i.done).length;
   const pct = total === 0 ? 0 : Math.round((doneCount / total) * 100);
@@ -717,7 +726,7 @@ function renderTodos() {
   }
 
   const filtered = appData.items
-    .filter((item) => (activeTag === 'all' ? true : item.tag === activeTag))
+    .filter((item) => !item.archived && (activeTag === 'all' ? true : item.tag === activeTag))
     .slice()
     .sort((a, b) => {
       if (a.done !== b.done) return a.done ? 1 : -1;
@@ -727,6 +736,7 @@ function renderTodos() {
       return (b.createdAt || 0) - (a.createdAt || 0);
     });
 
+  const pastDueItems = filtered.filter(isPastDueTodo);
   const dueItems = filtered.filter(isThisWeekTodo);
   const futureDatedItems = filtered.filter(isFutureDatedTodo);
   const noDueItems = filtered.filter((item) => !item.dueDate || Boolean(item.later));
@@ -742,6 +752,20 @@ function renderTodos() {
       list.appendChild(sep);
       futureDatedItems.forEach((item) => list.appendChild(createTodoListItem(item, renderTodos)));
     }
+  }
+
+  if (pastDueDock && pastDueList) {
+    pastDueDock.classList.toggle('hidden', pastDueItems.length === 0);
+    if (pastDueTitle) {
+      pastDueTitle.textContent = `지난 할 일 (${pastDueItems.length})`;
+    }
+    const toggleBtn = $('pastDueToggleBtn');
+    if (toggleBtn) {
+      toggleBtn.setAttribute('aria-expanded', isPastDueOpen ? 'true' : 'false');
+    }
+    pastDueList.classList.toggle('hidden', !isPastDueOpen);
+    pastDueList.innerHTML = '';
+    pastDueItems.forEach((item) => pastDueList.appendChild(createTodoListItem(item, renderTodos, { isPastDue: true })));
   }
 
   noDueDock.classList.remove('hidden');
@@ -800,9 +824,10 @@ function renderCalendar() {
     const dayEvents = events.filter((ev) => matchesCalendarEventDate(ev, dateStr, dow));
     const dayExams = exams.filter((ex) => ex.date === dateStr);
     const dayTodos = appData.items.filter((t) => t.dueDate === dateStr);
+    if (dayExams.length > 0) cell.classList.add('has-exam');
     const combined = [
+      ...dayExams.map((ex) => ({ kind: 'exam', text: `시험 · ${ex.title}`, done: false, color: '#EF4444' })),
       ...dayEvents.map((ev) => ({ kind: 'event', text: ev.title, done: false, color: '' })),
-      ...dayExams.map((ex) => ({ kind: 'exam', text: ex.title, done: false, color: '' })),
       ...dayTodos.map((t) => ({
         kind: 'todo',
         text: t.text,
@@ -902,7 +927,7 @@ function renderHomeOverview() {
 
   const upcomingExams = exams
     .map((ex) => ({ ex, due: getDueInfo(ex.date) }))
-    .filter((x) => x.due && x.due.diffDays >= 0 && x.due.diffDays <= 14)
+    .filter((x) => x.due && x.due.diffDays >= 0 && x.due.diffDays <= 30)
     .sort((a, b) => a.due.diffDays - b.due.diffDays);
 
   if (examStrip) {
@@ -934,10 +959,11 @@ function renderHomeOverview() {
 
     dayExams.forEach((ex) => {
       const li = document.createElement('li');
-      li.className = 'card-item compact-row';
-      li.style.borderLeft = '2px solid #E06C75';
+      li.className = 'card-item compact-row exam-priority-row';
+      li.style.borderLeft = '2.5px solid #EF4444';
+      li.style.background = 'rgba(239, 68, 68, 0.08)';
       li.style.paddingLeft = '8px';
-      li.innerHTML = `<div class="card-content"><span class="cal-badge" style="color:#E06C75;background:rgba(224,108,117,0.18);">시험</span><div class="card-title">${escapeHtml(ex.title)}</div></div>`;
+      li.innerHTML = `<div class="card-content"><span class="cal-badge" style="color:#EF4444;background:rgba(239,68,68,0.22);font-weight:700;">시험</span><div class="card-title" style="color:#FCA5A5;font-weight:600;">${escapeHtml(ex.title)}</div></div>`;
       list.appendChild(li);
     });
 
@@ -993,6 +1019,21 @@ function renderCalendarAgenda() {
     list.innerHTML = '<li class="empty-state">등록된 일정이 없습니다.</li>';
     return;
   }
+
+  dayExams.forEach((ex) => {
+    const li = document.createElement('li');
+    li.className = 'card-item compact-row exam-priority-row';
+    li.style.borderLeft = '2.5px solid #EF4444';
+    li.style.background = 'rgba(239, 68, 68, 0.08)';
+    li.style.paddingLeft = '8px';
+    li.innerHTML = `
+      <div class="card-content">
+        <span class="cal-badge" style="color:#EF4444; background:rgba(239,68,68,0.22); font-weight:700;">시험</span>
+        <div class="card-title" style="color:#FCA5A5; font-weight:600;">${escapeHtml(ex.title)}</div>
+      </div>
+    `;
+    list.appendChild(li);
+  });
 
   dayEvents.forEach((ev) => {
     const li = document.createElement('li');
@@ -1058,20 +1099,6 @@ function renderCalendarAgenda() {
       renderCalendar();
       await persistData();
     };
-    list.appendChild(li);
-  });
-
-  dayExams.forEach((ex) => {
-    const li = document.createElement('li');
-    li.className = 'card-item compact-row';
-    li.style.borderLeft = '2px solid #E06C75';
-    li.style.paddingLeft = '8px';
-    li.innerHTML = `
-      <div class="card-content">
-        <span class="cal-badge" style="color:#E06C75; background:rgba(224,108,117,0.18);">시험</span>
-        <div class="card-title">${escapeHtml(ex.title)}</div>
-      </div>
-    `;
     list.appendChild(li);
   });
 
@@ -1234,6 +1261,7 @@ function renderExamCard() {
     li.querySelector('.exam-del-btn').onclick = async () => {
       appData.studyExams = getStudyExams().filter((item) => item.id !== ex.id);
       renderExamCard();
+      renderCalendar();
       await persistData();
     };
     list.appendChild(li);
@@ -1975,6 +2003,73 @@ async function init() {
   requestAnimationFrame(() => updateTabIndicator());
   window.addEventListener('resize', () => updateTabIndicator());
 
+  const headerLogoEl = document.querySelector('.header-app-icon');
+  let logoAngle = 0;
+  let logoScale = 1;
+  let logoAnim = null;
+  let logoRunning = false;
+
+  const isLogoAnimActive = () => document.hasFocus() || Boolean($('pinBtn')?.classList.contains('active'));
+
+  const scheduleNextLogoStep = () => {
+    if (!logoRunning || !headerLogoEl || !isLogoAnimActive()) return;
+    const r = Math.random();
+    let duration, deltaDeg, nextScale, easing;
+    if (r < 0.40) {
+      // Slow organic drift & breathe
+      duration = 1700 + Math.random() * 1700;
+      deltaDeg = (Math.random() < 0.35 ? -1 : 1) * (15 + Math.random() * 45);
+      easing = 'ease-in-out';
+    } else if (r < 0.75) {
+      // Medium lively turn
+      duration = 850 + Math.random() * 750;
+      deltaDeg = (Math.random() < 0.2 ? -1 : 1) * (140 + Math.random() * 240);
+      easing = 'cubic-bezier(0.22, 1, 0.36, 1)';
+    } else {
+      // Fast energetic spin
+      duration = 650 + Math.random() * 550;
+      deltaDeg = (Math.random() < 0.15 ? -1 : 1) * (540 + Math.random() * 540);
+      easing = 'cubic-bezier(0.65, 0, 0.35, 1)';
+    }
+    // Independent wider random scale range (0.78x ~ 1.26x)
+    nextScale = 0.78 + Math.random() * 0.48;
+    const prevAngle = logoAngle;
+    const prevScale = logoScale;
+    logoAngle += deltaDeg;
+    logoScale = nextScale;
+
+    logoAnim = headerLogoEl.animate(
+      [
+        { transform: `scale(${prevScale.toFixed(3)}) rotate(${prevAngle.toFixed(1)}deg)` },
+        { transform: `scale(${logoScale.toFixed(3)}) rotate(${logoAngle.toFixed(1)}deg)` }
+      ],
+      { duration, easing, fill: 'forwards' }
+    );
+    logoAnim.onfinish = () => {
+      if (logoRunning) scheduleNextLogoStep();
+    };
+  };
+
+  const syncWindowFocusClass = () => {
+    const active = isLogoAnimActive();
+    document.body.classList.toggle('window-focused', active);
+    if (active && !logoRunning) {
+      logoRunning = true;
+      scheduleNextLogoStep();
+    } else if (!active && logoRunning) {
+      logoRunning = false;
+      if (logoAnim) logoAnim.cancel();
+      if (headerLogoEl) {
+        logoAngle = logoAngle % 360;
+        logoScale = 1;
+        headerLogoEl.style.transform = 'scale(1) rotate(0deg)';
+      }
+    }
+  };
+  syncWindowFocusClass();
+  window.addEventListener('focus', syncWindowFocusClass);
+  window.addEventListener('blur', syncWindowFocusClass);
+
   tabBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       switchToTab(btn.dataset.tab);
@@ -2013,6 +2108,15 @@ async function init() {
 
   // Tag filters (dynamic)
   renderTagFilters();
+
+  $('pastDueHeader')?.addEventListener('click', () => {
+    isPastDueOpen = !isPastDueOpen;
+    const toggleBtn = $('pastDueToggleBtn');
+    if (toggleBtn) {
+      toggleBtn.setAttribute('aria-expanded', isPastDueOpen ? 'true' : 'false');
+    }
+    $('pastDueList')?.classList.toggle('hidden', !isPastDueOpen);
+  });
 
   // Sync/Refresh button next to filter chips
   $('syncTodoBtn').addEventListener('click', async () => {
@@ -2152,6 +2256,7 @@ async function init() {
   $('pinBtn').addEventListener('click', async () => {
     const pinned = await api.togglePin();
     $('pinBtn').classList.toggle('active', pinned);
+    syncWindowFocusClass();
   });
 
   if ($('opacityRange')) {
@@ -2272,6 +2377,7 @@ async function init() {
     });
     $('examTitleInput').value = '';
     renderExamCard();
+    renderCalendar();
     $('examEditRow').classList.add('hidden');
     await persistData();
   });

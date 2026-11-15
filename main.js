@@ -83,6 +83,11 @@ let lastSelfWriteAt = 0;
 
 function saveData(data) {
   try {
+    if (fs.existsSync(DATA_FILE)) {
+      try {
+        fs.copyFileSync(DATA_FILE, DATA_FILE + '.bak');
+      } catch {}
+    }
     lastSelfWriteAt = Date.now();
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
@@ -561,12 +566,14 @@ app.whenReady().then(() => {
     }
   });
 
-  function readSpotifyStatus() {
+  function readSpotifyStatus(action = '') {
     return new Promise((resolve) => {
       const scriptPath = path.join(__dirname, 'scripts', 'spotify-status.ps1');
+      const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath];
+      if (action) args.push('-Action', action);
       execFile(
         'powershell',
-        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+        args,
         { windowsHide: true, timeout: 4000, encoding: 'utf8' },
         (err, stdout) => {
           if (err) return resolve({ running: false, playing: false, track: '' });
@@ -584,15 +591,10 @@ app.whenReady().then(() => {
   ipcMain.handle('spotify:status', () => readSpotifyStatus());
 
   ipcMain.handle('spotify:control', async (_event, action) => {
-    const keyMap = { playpause: '0xB3', next: '0xB0', prev: '0xB1' };
-    const vk = keyMap[action];
-    if (!vk) return readSpotifyStatus();
-    await new Promise((resolve) => {
-      const ps = `Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class K { [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, uint dwExtraInfo); }'; [K]::keybd_event(${vk},0,0,0); [K]::keybd_event(${vk},0,2,0);`;
-      execFile('powershell', ['-NoProfile', '-Command', ps], { windowsHide: true, timeout: 3000 }, () => resolve());
-    });
-    await new Promise((r) => setTimeout(r, 250));
-    return readSpotifyStatus();
+    if (!['playpause', 'next', 'prev'].includes(action)) {
+      return readSpotifyStatus();
+    }
+    return readSpotifyStatus(action);
   });
 
   ipcMain.handle('notices:fetch', async (_event, url) => {

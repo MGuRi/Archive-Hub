@@ -1,3 +1,7 @@
+param(
+  [string]$Action = ""
+)
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $procs = Get-Process Spotify -ErrorAction SilentlyContinue
 if (-not $procs) {
@@ -25,6 +29,16 @@ try {
   $sessions = $mgr.GetSessions()
   foreach ($s in $sessions) {
     if ($s.SourceAppUserModelId -match 'Spotify') {
+      if ($Action -eq 'playpause') {
+        Await ($s.TryTogglePlayPauseAsync()) ([bool]) | Out-Null
+        Start-Sleep -Milliseconds 180
+      } elseif ($Action -eq 'next') {
+        Await ($s.TrySkipNextAsync()) ([bool]) | Out-Null
+        Start-Sleep -Milliseconds 180
+      } elseif ($Action -eq 'prev') {
+        Await ($s.TrySkipPreviousAsync()) ([bool]) | Out-Null
+        Start-Sleep -Milliseconds 180
+      }
       $pb = [string]$s.GetPlaybackInfo().PlaybackStatus
       $props = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
       $artist = [string]$props.Artist
