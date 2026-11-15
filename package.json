@@ -1,0 +1,13 @@
+{
+  "name": "moment-archive",
+  "productName": "Archive Hub",
+  "version": "1.0.0",
+  "description": "Archive Hub - Desktop Widget",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
