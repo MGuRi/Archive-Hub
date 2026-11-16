@@ -388,8 +388,16 @@
               <button type="button" class="gemini-model-btn" id="geminiModelBtn">3.8 Flash ▾</button>
               <div class="gemini-model-menu hidden" id="geminiModelMenu">
                 <button type="button" class="gemini-model-option active" data-model="gemini-3.8-flash">3.8 Flash</button>
+                <button type="button" class="gemini-model-option" data-model="gemini-3.7-flash">3.7 Flash</button>
                 <button type="button" class="gemini-model-option" data-model="gemini-3.6-flash">3.6 Flash</button>
                 <button type="button" class="gemini-model-option" data-model="gemini-3.5-flash">3.5 Flash</button>
+                <button type="button" class="gemini-model-option" data-model="gemini-3.5-flash-lite">3.5 Flash-Lite</button>
+                <button type="button" class="gemini-model-option" data-model="gemini-4-hydrogen">4 Hydrogen</button>
+                <button type="button" class="gemini-model-option" data-model="gemini-4-carbon">4 Carbon</button>
+                <button type="button" class="gemini-model-option" data-model="gemini-4-argon">4 Argon</button>
+                <button type="button" class="gemini-model-option" data-model="gemini-flash-latest">Flash Latest</button>
+                <button type="button" class="gemini-model-option" data-model="gemini-flash-lite-latest">Flash-Lite Latest</button>
+                <button type="button" class="gemini-model-option" data-model="gemini-pro-latest">Pro Latest</button>
               </div>
             </div>
             <button type="button" class="ghost-btn" id="clearGeminiBtn">새 채팅</button>
@@ -402,8 +410,13 @@
         <div class="mention-popup hidden" id="geminiMentionPopup"></div>
         <form class="gemini-chat-form" id="geminiForm">
           <button type="button" class="ghost-btn gemini-attach-btn" id="geminiAttachBtn" title="파일/사진/PDF 첨부">+</button>
-          <input type="text" id="geminiInput" placeholder="질문 입력... (@ 내 파일 / 바로가기 첨부)" autocomplete="off" />
-          <button type="submit" class="ghost-btn" id="geminiSendBtn">전송</button>
+          <textarea id="geminiInput" rows="1" placeholder="질문 입력... (@ 내 파일 / 바로가기 첨부)" autocomplete="off"></textarea>
+          <button type="submit" class="ghost-btn gemini-send-btn" id="geminiSendBtn" title="전송" aria-label="전송">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
         </form>
       </section>
 

@@ -824,6 +824,9 @@ app.whenReady().then(() => {
       const blocks = [];
       for (const f of attachedFiles.slice(0, 5)) {
         if (!f || !f.path) continue;
+        if (f.isMemo || typeof f.memoText === 'string') {
+          continue;
+        }
         if (f.isUrl || /^https?:\/\//i.test(f.path)) {
           blocks.push(`--- Web Link: ${f.name || f.path} (${f.path}) ---`);
           continue;
@@ -970,13 +973,13 @@ app.whenReady().then(() => {
 
     const candidates = [targetModel];
     if (targetModel === 'gemini-3.8-flash') {
-      candidates.push('gemini-3.6-flash', 'gemini-3.5-flash');
+      candidates.push('gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash');
     }
 
     let lastError = 'Gemini 호출 실패';
     for (const m of candidates) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30000);
+      const timer = setTimeout(() => controller.abort(), 90000);
       try {
         const res = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -1001,7 +1004,7 @@ app.whenReady().then(() => {
       } catch (err) {
         clearTimeout(timer);
         if (err?.name === 'AbortError') {
-          lastError = '응답 시간이 초과되었습니다 (30초). 다시 시도해 주세요.';
+          lastError = '응답 시간이 초과되었습니다 (90초). 다시 시도해 주세요.';
         } else {
           lastError = err?.message || 'Gemini 호출 실패';
         }

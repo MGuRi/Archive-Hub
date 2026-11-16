@@ -1430,24 +1430,30 @@ async function loadNotices() {
   const seenSet = new Set(appData.settings.seenNoticeIds || []);
   let newCount = 0;
 
-  // Put latest regular notices first, pinned notices below
-  const sortedNotices = [
-    ...res.items.filter((n) => !n.isPinned),
-    ...res.items.filter((n) => n.isPinned)
-  ];
+  const parseNoticeSortKey = (dateStr) => {
+    const raw = String(dateStr || '').trim();
+    const ymd = raw.match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/);
+    if (ymd) return Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+    const md = raw.match(/^(\d{1,2})[.\-/](\d{1,2})/);
+    if (md) return Date.UTC(new Date().getFullYear(), Number(md[1]) - 1, Number(md[2]));
+    const hm = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (hm) {
+      const now = new Date();
+      return Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), Number(hm[1]), Number(hm[2]));
+    }
+    return 0;
+  };
+
+  // Sort all notices (including pinned) together by date descending
+  const sortedNotices = res.items.slice().sort((a, b) => {
+    const diff = parseNoticeSortKey(b.date) - parseNoticeSortKey(a.date);
+    if (diff !== 0) return diff;
+    return (Number(b.id) || 0) - (Number(a.id) || 0);
+  });
 
   list.innerHTML = '';
-  let renderedPinnedHeader = false;
 
   sortedNotices.forEach((notice) => {
-    if (notice.isPinned && !renderedPinnedHeader) {
-      renderedPinnedHeader = true;
-      const sep = document.createElement('li');
-      sep.className = 'notice-section-label';
-      sep.textContent = '상단 고정 공지';
-      list.appendChild(sep);
-    }
-
     const isNew = seenSet.size > 0 && !seenSet.has(notice.id);
     if (isNew) newCount++;
 
@@ -1461,11 +1467,12 @@ async function loadNotices() {
     }
 
     const li = document.createElement('li');
-    li.className = `card-item clickable notice-card ${notice.isPinned ? 'pinned-notice' : ''}`;
+    li.className = `card-item clickable notice-card${notice.isPinned ? ' pinned-notice' : ''}`;
     li.innerHTML = `
       <div class="card-content">
         <div class="card-title">${escapeHtml(displayTitle)}</div>
         <div class="card-meta">
+          ${notice.isPinned ? '<span class="pill pill-pinned">고정</span>' : ''}
           ${isNew ? '<span class="pill pill-new">NEW</span>' : ''}
           ${prefix ? `<span class="pill pill-tag">${escapeHtml(prefix)}</span>` : ''}
           <span>${escapeHtml(notice.date || '공지')}</span>
@@ -2629,7 +2636,9 @@ async function init() {
         name: file.name,
         path: file.path,
         prefix: mentionMode,
-        isUrl: Boolean(file.isUrl)
+        isUrl: Boolean(file.isUrl),
+        isMemo: Boolean(file.isMemo),
+        memoText: file.memoText || ''
       });
       renderAttachedChips();
     }
@@ -2637,6 +2646,8 @@ async function init() {
     if (input) {
       if (mentionMode === '/') {
         input.value = input.value.replace(/(^|\s)\/([^\s/]*)$/, '$1').trimStart();
+      } else if (mentionMode === '#') {
+        input.value = input.value.replace(/(^|\s)#([^\s#]*)$/, '$1').trimStart();
       } else {
         input.value = input.value.replace(/@([^\s@]*)$/, '').trimStart();
       }
@@ -2726,10 +2737,45 @@ async function init() {
   }
 
   if ($('geminiInput')) {
+    const resizeGeminiInput = () => {
+      const el = $('geminiInput');
+      if (!el) return;
+      el.style.height = '30px';
+      el.style.height = `${Math.min(Math.max(el.scrollHeight, 30), 96)}px`;
+    };
+
     $('geminiInput').addEventListener('input', () => {
+      resizeGeminiInput();
       const val = $('geminiInput').value;
+      const hashMatch = val.match(/(?:^|\s)#([^\s#]*)$/);
       const slashMatch = val.match(/(?:^|\s)\/([^\s/]*)$/);
       const atMatch = val.match(/@([^\s@]*)$/);
+
+      if (hashMatch) {
+        mentionMode = '#';
+        const q = hashMatch[1].trim().toLowerCase();
+        clearTimeout(mentionTimer);
+        const notes = ensureMemoNotes().filter((n) => (n.text || '').trim().length > 0);
+        mentionResults = notes
+          .filter((n) => !q || (n.text || '').toLowerCase().includes(q))
+          .slice(0, 12)
+          .map((n) => {
+            const trimmed = n.text.trim();
+            const firstLine = trimmed.split(/\r?\n/)[0].trim();
+            const shortTitle = firstLine.length > 26 ? `${firstLine.slice(0, 26)}...` : firstLine;
+            const preview = trimmed.replace(/\s+/g, ' ');
+            return {
+              name: shortTitle || '메모',
+              path: `memo://${n.id}`,
+              isMemo: true,
+              memoText: n.text,
+              rel: preview.length > 48 ? `${preview.slice(0, 48)}...` : preview
+            };
+          });
+        mentionIndex = 0;
+        renderMentionPopup();
+        return;
+      }
 
       if (slashMatch) {
         mentionMode = '/';
@@ -2767,21 +2813,31 @@ async function init() {
 
     $('geminiInput').addEventListener('keydown', (e) => {
       const popup = $('geminiMentionPopup');
-      if (!popup || popup.classList.contains('hidden') || mentionResults.length === 0) return;
-      if (e.key === 'ArrowDown') {
+      const popupOpen = popup && !popup.classList.contains('hidden') && mentionResults.length > 0;
+      if (popupOpen) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          mentionIndex = (mentionIndex + 1) % mentionResults.length;
+          renderMentionPopup();
+          return;
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          mentionIndex = (mentionIndex - 1 + mentionResults.length) % mentionResults.length;
+          renderMentionPopup();
+          return;
+        } else if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+          e.preventDefault();
+          selectMentionFile(mentionResults[mentionIndex]);
+          return;
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          hideMentionPopup();
+          return;
+        }
+      }
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
-        mentionIndex = (mentionIndex + 1) % mentionResults.length;
-        renderMentionPopup();
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        mentionIndex = (mentionIndex - 1 + mentionResults.length) % mentionResults.length;
-        renderMentionPopup();
-      } else if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        selectMentionFile(mentionResults[mentionIndex]);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        hideMentionPopup();
+        $('geminiForm')?.requestSubmit();
       }
     });
 
@@ -2795,17 +2851,43 @@ async function init() {
       e.preventDefault();
       const input = $('geminiInput');
       const prompt = input.value.trim();
-      if (!prompt) return;
-      const filesToAttach = attachedGeminiFiles.slice();
+      const rawFiles = attachedGeminiFiles.slice();
+      if (!prompt && rawFiles.length === 0) return;
+
+      // Refresh latest memo text at submit time
+      const memoNotes = ensureMemoNotes();
+      const filesToAttach = rawFiles.map((f) => {
+        if (f.isMemo && String(f.path || '').startsWith('memo://')) {
+          const memoId = String(f.path).slice('memo://'.length);
+          const found = memoNotes.find((n) => n.id === memoId);
+          return { ...f, memoText: found ? found.text : (f.memoText || '') };
+        }
+        return f;
+      });
+
       attachedGeminiFiles = [];
       renderAttachedChips();
       hideMentionPopup();
       input.value = '';
+      input.style.height = '30px';
+
       const displayPrompt = filesToAttach.length > 0
-        ? `${prompt}\n[첨부: ${filesToAttach.map((f) => f.name).join(', ')}]`
+        ? [prompt, `[첨부: ${filesToAttach.map((f) => `${f.prefix || '@'}${f.name}`).join(', ')}]`].filter(Boolean).join('\n')
         : prompt;
+
+      const memoParts = filesToAttach
+        .filter((f) => f.isMemo && (f.memoText || '').trim())
+        .map((f) => `[첨부 메모: ${f.name}]\n${f.memoText.trim()}`);
+      const otherAttachNames = filesToAttach
+        .filter((f) => !f.isMemo)
+        .map((f) => `${f.prefix || '@'}${f.name}`);
+      const apiTextParts = [prompt || '첨부한 내용을 확인해 주세요.'];
+      if (memoParts.length > 0) apiTextParts.push(memoParts.join('\n\n'));
+      if (otherAttachNames.length > 0) apiTextParts.push(`[첨부: ${otherAttachNames.join(', ')}]`);
+      const apiText = apiTextParts.join('\n\n');
+
       const history = getGeminiHistory();
-      history.push({ role: 'user', text: displayPrompt });
+      history.push({ role: 'user', text: displayPrompt, ...(memoParts.length > 0 ? { apiText } : {}) });
       renderGeminiMessages();
 
       const sendBtn = $('geminiSendBtn');
@@ -2813,7 +2895,7 @@ async function init() {
 
       const contents = history
         .filter((m) => !m.isError && !m.isLoading)
-        .map((m) => ({ role: m.role, parts: [{ text: m.text }] }));
+        .map((m) => ({ role: m.role, parts: [{ text: m.apiText || m.text }] }));
       const loadingMsg = { role: 'model', text: '', isLoading: true };
       history.push(loadingMsg);
       renderGeminiMessages();
