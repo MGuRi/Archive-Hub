@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('widgetAPI', {
   listReports: (dirPath) => ipcRenderer.invoke('reports:list', dirPath),
   openPath: (targetPath) => ipcRenderer.invoke('shell:open-path', targetPath),
   openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+  readPaperLink: (filePath) => ipcRenderer.invoke('paper:read-link', filePath),
   getFileIcon: (targetPath) => ipcRenderer.invoke('shell:get-file-icon', targetPath),
   getSpotifyStatus: () => ipcRenderer.invoke('spotify:status'),
   controlSpotify: (action) => ipcRenderer.invoke('spotify:control', action),

@@ -45,6 +45,8 @@ let activeStudyWeek = 'all';
 let isMiniMode = false;
 let isWeeklyMode = false;
 let draggedTodoId = null;
+let draggedTabName = null;
+let draggedPinnedFileId = null;
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth();
 let calSelectedDate = '';
@@ -321,12 +323,14 @@ function createTodoListItem(item, rerender, opts = {}) {
     $('noDueDock')?.classList.remove('drop-active');
   });
 
-  // External file/folder drop onto To-Do item
+  // External file/folder or PaperReader link drop onto To-Do item
   li.addEventListener('dragover', (e) => {
-    if (draggedTodoId) return;
-    if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+    if (draggedTodoId || draggedPinnedFileId || draggedTabName || draggedLinkId) return;
+    const types = Array.from(e.dataTransfer?.types || []);
+    if (types.some((t) => /files|uri-list|text\/plain|^text$/i.test(t))) {
       e.preventDefault();
       e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       li.classList.add('file-drop-target');
     }
   });
@@ -336,21 +340,56 @@ function createTodoListItem(item, rerender, opts = {}) {
     }
   });
   li.addEventListener('drop', async (e) => {
-    if (draggedTodoId) return;
+    if (draggedTodoId || draggedPinnedFileId || draggedTabName || draggedLinkId) return;
     const files = e.dataTransfer?.files;
-    if (!files || files.length === 0) return;
+    const rawUri =
+      e.dataTransfer?.getData('text/uri-list') ||
+      e.dataTransfer?.getData('text/plain') ||
+      e.dataTransfer?.getData('Text') ||
+      '';
+    const firstLine = rawUri.trim().split(/\r?\n/)[0]?.trim() || '';
+    const isPaperReaderLink = firstLine.startsWith('paperreader://');
+
+    if ((!files || files.length === 0) && !isPaperReaderLink) return;
     e.preventDefault();
     e.stopPropagation();
     li.classList.remove('file-drop-target');
     if (!Array.isArray(item.attachments)) item.attachments = [];
-    for (const file of Array.from(files)) {
-      const filePath = api.getFilePath ? api.getFilePath(file) : (file.path || '');
-      if (!filePath) continue;
-      if (!item.attachments.some((a) => a.path === filePath)) {
-        item.attachments.push({
-          name: file.name || filePath.split(/[\\/]/).pop() || filePath,
-          path: filePath
-        });
+
+    if (isPaperReaderLink) {
+      try {
+        const u = new URL(firstLine);
+        const title = u.searchParams.get('title') || 'PaperReader 논문';
+        const cleanLink = `${u.protocol}//${u.host}${u.pathname}`;
+        if (!item.attachments.some((a) => a.path === cleanLink)) {
+          item.attachments.push({
+            name: `📄 ${title}`,
+            path: cleanLink
+          });
+        }
+      } catch {}
+    } else if (files && files.length > 0) {
+      for (const file of Array.from(files)) {
+        const filePath = api.getFilePath ? api.getFilePath(file) : (file.path || '');
+        if (!filePath) continue;
+        if (filePath.toLowerCase().endsWith('.paperlink') && api.readPaperLink) {
+          const linkInfo = await api.readPaperLink(filePath);
+          if (linkInfo?.ok && linkInfo.url) {
+            if (!item.attachments.some((a) => a.path === linkInfo.url)) {
+              item.attachments.push({
+                name: linkInfo.title || 'PaperReader 논문',
+                path: linkInfo.url
+              });
+            }
+            continue;
+          }
+        }
+        if (!item.attachments.some((a) => a.path === filePath)) {
+          item.attachments.push({
+            name: file.name || filePath.split(/[\\/]/).pop() || filePath,
+            path: filePath
+          });
+        }
       }
     }
     item._attOpen = true;
@@ -574,9 +613,11 @@ function createTodoListItem(item, rerender, opts = {}) {
     attDrawer.className = `todo-attachments${item._attOpen ? '' : ' hidden'}`;
     attachments.forEach((att) => {
       const chip = document.createElement('div');
-      chip.className = 'todo-att-chip';
+      const isPaperReader = typeof att.path === 'string' && att.path.startsWith('paperreader://');
+      const displayName = isPaperReader ? String(att.name || '').replace(/^📄\s*/, '') : att.name;
+      chip.className = `todo-att-chip${isPaperReader ? ' is-paperreader' : ''}`;
       chip.title = att.path;
-      chip.innerHTML = `<span class="todo-att-name">${escapeHtml(att.name)}</span><button type="button" class="todo-att-del" title="연결 해제">×</button>`;
+      chip.innerHTML = `${isPaperReader ? '<img class="todo-att-icon" src="assets/icons/paperreader.png" alt="PaperReader" />' : ''}<span class="todo-att-name">${escapeHtml(displayName)}</span><button type="button" class="todo-att-del" title="연결 해제">×</button>`;
       chip.addEventListener('click', (e) => {
         if (e.target.closest('.todo-att-del')) return;
         e.stopPropagation();
@@ -885,12 +926,37 @@ function renderHomeOverview() {
   if (!strip || !list) return;
 
   const todayStr = getTodayDateString();
-  const endStr = addDaysToDateStr(todayStr, 7);
+  const todayObj = new Date(`${todayStr}T00:00:00`);
+  const mondayOffset = (todayObj.getDay() + 6) % 7;
+  const mondayStr = addDaysToDateStr(todayStr, -mondayOffset);
   const events = Array.isArray(appData.calendarEvents) ? appData.calendarEvents : [];
   const exams = Array.isArray(appData.studyExams) ? appData.studyExams : [];
   const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
 
   strip.innerHTML = '';
+  for (let i = 0; i < 7; i++) {
+    const dateStr = addDaysToDateStr(mondayStr, i);
+    const dObj = new Date(`${dateStr}T00:00:00`);
+    const dow = dObj.getDay();
+    const dayTodos = appData.items.filter((t) => !t.done && t.dueDate === dateStr);
+    const dayEvents = events.filter((ev) => matchesCalendarEventDate(ev, dateStr, dow));
+    const dayExams = exams.filter((ex) => ex.date === dateStr);
+
+    const pill = document.createElement('div');
+    pill.className = `home-day-pill${dateStr === todayStr ? ' today' : ''}`;
+    const dotsHtml = [
+      dayExams.length ? '<span class="cal-dot exam"></span>' : '',
+      dayEvents.length ? '<span class="cal-dot event"></span>' : '',
+      dayTodos.length ? '<span class="cal-dot todo"></span>' : ''
+    ].join('');
+    pill.innerHTML = `
+      <span>${dayNames[dow]}</span>
+      <span class="home-day-num">${dObj.getDate()}</span>
+      <div class="home-day-dots">${dotsHtml}</div>
+    `;
+    strip.appendChild(pill);
+  }
+
   let totalCount = 0;
   const grouped = [];
 
@@ -901,22 +967,6 @@ function renderHomeOverview() {
     const dayTodos = appData.items.filter((t) => !t.done && t.dueDate === dateStr);
     const dayEvents = events.filter((ev) => matchesCalendarEventDate(ev, dateStr, dow));
     const dayExams = exams.filter((ex) => ex.date === dateStr);
-
-    if (offset < 7) {
-      const pill = document.createElement('div');
-      pill.className = `home-day-pill${offset === 0 ? ' today' : ''}`;
-      const dotsHtml = [
-        dayExams.length ? '<span class="cal-dot exam"></span>' : '',
-        dayEvents.length ? '<span class="cal-dot event"></span>' : '',
-        dayTodos.length ? '<span class="cal-dot todo"></span>' : ''
-      ].join('');
-      pill.innerHTML = `
-        <span>${dayNames[dow]}</span>
-        <span class="home-day-num">${dObj.getDate()}</span>
-        <div class="home-day-dots">${dotsHtml}</div>
-      `;
-      strip.appendChild(pill);
-    }
 
     if (dayTodos.length || dayEvents.length || dayExams.length) {
       totalCount += dayTodos.length + dayEvents.length + dayExams.length;
@@ -1962,7 +2012,7 @@ async function init() {
     }
   }
 
-  let draggedTabName = null;
+  draggedTabName = null;
   tabBtns.forEach((btn) => {
     btn.draggable = true;
     btn.addEventListener('dragstart', (e) => {
@@ -2020,26 +2070,14 @@ async function init() {
 
   const scheduleNextLogoStep = () => {
     if (!logoRunning || !headerLogoEl || !isLogoAnimActive()) return;
-    const r = Math.random();
-    let duration, deltaDeg, nextScale, easing;
-    if (r < 0.40) {
-      // Slow organic drift & breathe
-      duration = 1700 + Math.random() * 1700;
-      deltaDeg = (Math.random() < 0.35 ? -1 : 1) * (15 + Math.random() * 45);
-      easing = 'ease-in-out';
-    } else if (r < 0.75) {
-      // Medium lively turn
-      duration = 850 + Math.random() * 750;
-      deltaDeg = (Math.random() < 0.2 ? -1 : 1) * (140 + Math.random() * 240);
-      easing = 'cubic-bezier(0.22, 1, 0.36, 1)';
-    } else {
-      // Fast energetic spin
-      duration = 650 + Math.random() * 550;
-      deltaDeg = (Math.random() < 0.15 ? -1 : 1) * (540 + Math.random() * 540);
-      easing = 'cubic-bezier(0.65, 0, 0.35, 1)';
-    }
-    // Independent wider random scale range (0.78x ~ 1.26x)
-    nextScale = 0.78 + Math.random() * 0.48;
+    // Balanced lively drift with frequent brisk spins
+    const isSpin = Math.random() < 0.32;
+    const duration = isSpin ? 800 + Math.random() * 400 : 1800 + Math.random() * 1200;
+    const deltaDeg = isSpin
+      ? (Math.random() < 0.2 ? -1 : 1) * (360 + Math.random() * 360)
+      : (Math.random() < 0.25 ? -1 : 1) * (25 + Math.random() * 45);
+    const easing = isSpin ? 'cubic-bezier(0.22, 1, 0.36, 1)' : 'ease-in-out';
+    const nextScale = isSpin ? 0.92 + Math.random() * 0.2 : 0.92 + Math.random() * 0.16;
     const prevAngle = logoAngle;
     const prevScale = logoScale;
     logoAngle += deltaDeg;
@@ -2101,9 +2139,57 @@ async function init() {
         return;
       }
     }
-    if (e.key !== 'Tab' || e.ctrlKey || e.metaKey || e.altKey) return;
     const activeEl = document.activeElement;
-    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || activeEl.isContentEditable)) {
+    const activeTag = activeEl?.tagName;
+    const isEditableFocused = Boolean(
+      activeEl && (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT' || activeEl.isContentEditable)
+    );
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing) {
+      if (isEditableFocused) return;
+      e.preventDefault();
+      $('pinBtn')?.click();
+      return;
+    }
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !e.isComposing) {
+      const settingsDrawer = $('settingsDrawer');
+      if (settingsDrawer && !settingsDrawer.classList.contains('hidden')) {
+        if (activeTag === 'BUTTON' || activeTag === 'A' || activeTag === 'TEXTAREA') {
+          return;
+        }
+        e.preventDefault();
+        $('saveSettingsBtn')?.click();
+        return;
+      }
+      if (isEditableFocused || activeTag === 'BUTTON' || activeTag === 'A') {
+        return;
+      }
+      const activePanel = document.querySelector('.tab-panel.active');
+      const activeId = activePanel ? activePanel.id : '';
+      if (activeId === 'tab-files') {
+        const urlInput = $('fileUrlInput');
+        if (urlInput) {
+          e.preventDefault();
+          urlInput.focus();
+        }
+        return;
+      }
+      if (activeId === 'tab-gemini') {
+        const geminiInput = $('geminiInput');
+        if (geminiInput) {
+          e.preventDefault();
+          geminiInput.focus();
+        }
+        return;
+      }
+      const addBtn = $('toggleAddTodoBtn');
+      if (addBtn && !addBtn.classList.contains('hidden') && addBtn.textContent.trim() === '+') {
+        e.preventDefault();
+        addBtn.click();
+      }
+      return;
+    }
+    if (e.key !== 'Tab' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (isEditableFocused) {
       return;
     }
     e.preventDefault();
@@ -2261,8 +2347,13 @@ async function init() {
 
   // Window Controls
   $('pinBtn').addEventListener('click', async () => {
+    const pinBtn = $('pinBtn');
     const pinned = await api.togglePin();
-    $('pinBtn').classList.toggle('active', pinned);
+    pinBtn.classList.remove('is-pinning', 'is-unpinning');
+    void pinBtn.offsetWidth;
+    pinBtn.classList.toggle('active', pinned);
+    pinBtn.classList.add(pinned ? 'is-pinning' : 'is-unpinning');
+    pinBtn.title = pinned ? '항상 위 고정' : '항상 위 해제됨';
     syncWindowFocusClass();
   });
 
@@ -3261,7 +3352,7 @@ async function init() {
   }
 
   // ---------- Pinned Files Drop-Zone Tab ----------
-  let draggedPinnedFileId = null;
+  draggedPinnedFileId = null;
 
   async function addPinnedFilePaths(paths) {
     if (!paths || paths.length === 0) return;

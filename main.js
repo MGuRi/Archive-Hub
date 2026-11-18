@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, nativeImage, glo
 const path = require('path');
 const fs = require('fs');
 const tls = require('tls');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 
 const DATA_FILE = path.join(app.getPath('appData'), 'my-todo-schedule-widget', 'todo-schedule-data.json');
 const DEFAULT_REPORTS_DIR = 'C:\\Users\\mouph\\Desktop\\Daily Reports\\reports';
@@ -546,6 +546,27 @@ app.whenReady().then(() => {
 
   ipcMain.handle('shell:open-path', async (_event, targetPath) => {
     if (!targetPath) return false;
+    if (typeof targetPath === 'string' && targetPath.startsWith('paperreader://')) {
+      const paperReaderDir = path.resolve(__dirname, '..', 'Paper-reading-assistant');
+      const electronExe = path.join(paperReaderDir, 'node_modules', 'electron', 'dist', 'electron.exe');
+      if (fs.existsSync(electronExe)) {
+        try {
+          const child = spawn(electronExe, ['.', targetPath], {
+            cwd: paperReaderDir,
+            detached: true,
+            stdio: 'ignore'
+          });
+          child.unref();
+          return true;
+        } catch {}
+      }
+      await shell.openExternal(targetPath);
+      return true;
+    }
+    if (typeof targetPath === 'string' && /^https?:\/\//i.test(targetPath)) {
+      await shell.openExternal(targetPath);
+      return true;
+    }
     const err = await shell.openPath(targetPath);
     return !err;
   });
@@ -554,6 +575,20 @@ app.whenReady().then(() => {
     if (!url) return false;
     await shell.openExternal(url);
     return true;
+  });
+
+  ipcMain.handle('paper:read-link', (_event, filePath) => {
+    try {
+      if (!filePath || !String(filePath).toLowerCase().endsWith('.paperlink')) return { ok: false };
+      if (!fs.existsSync(filePath)) return { ok: false };
+      const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      if (parsed && typeof parsed.url === 'string' && parsed.url.startsWith('paperreader://')) {
+        return { ok: true, title: parsed.title || 'PaperReader 논문', url: parsed.url };
+      }
+      return { ok: false };
+    } catch {
+      return { ok: false };
+    }
   });
 
   ipcMain.handle('shell:get-file-icon', async (_event, targetPath) => {
